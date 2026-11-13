@@ -249,6 +249,7 @@ const store = {
   get(k, d){ try{ const v = localStorage.getItem("cj_"+k); return v===null? d : JSON.parse(v);}catch(e){ return d; } },
   set(k, v){ try{ localStorage.setItem("cj_"+k, JSON.stringify(v)); }catch(e){} }
 };
+if (store.get("readReset", 0) < 1){ store.set("read", {}); store.set("readReset", 1); } // one-off: show every job as unopened again
 let stars = store.get("stars", {}), read = store.get("read", {}), notes = store.get("notes", {}), answers = store.get("answers", {});
 
 /* ---------- helpers ---------- */
@@ -383,7 +384,7 @@ const NAV = [
 ];
 
 function renderNav(jobs){
-  const unread = jobs.filter(j => !read[j.id] && !ruleBreaks(j).length).length;
+  const unread = jobs.filter(j => !read[j.id]).length;
   const counts = {jobs: unread || "", saved: Object.keys(stars).filter(k=>stars[k]).length || "", notes: Object.keys(notes).filter(k=>notes[k]).length || ""};
   $("#nav").innerHTML = NAV.map(([k,label,icon]) =>
     `<button data-v="${k}" class="${view===k?"on":""}"><svg viewBox="0 0 24 24" fill="currentColor">${icon}</svg>${label}<span class="count">${counts[k]||""}</span></button>`).join("");
@@ -459,8 +460,7 @@ function viewJobs(saved){
     pay: (a,b) => (annual(b.salary) ?? -1) - (annual(a.salary) ?? -1),
   }[sortBy];
   list = [...list].sort(cmp);
-  const main = list.filter(j => !ruleBreaks(j).length);
-  const other = list.filter(j => ruleBreaks(j).length);
+  const main = list; // everything in one list; rule labels shown on each row, she hides as she goes
   const contracts = [...new Set(jobs.map(contractOf))].sort();
   return `<div class="bar">
     <h1>${saved?"Saved":"Jobs"}</h1>
@@ -472,7 +472,6 @@ function viewJobs(saved){
     <div class="status">${statusLine()}</div>
   </div>
   ${main.length? main.map(rowHTML).join("") : `<div class="empty">${saved?"No saved jobs. Tap the star on a job to save it.":"No jobs match these filters."}</div>`}
-  ${other.length?`<details class="other" ${store.get("otherOpen",false)?"open":""}><summary>Other options (${other.length}) – break one of your rules: bank, nights, higher qualifications, senior/specialist role, children's work, or over ${RADIUS} miles</summary>${other.map(rowHTML).join("")}</details>`:""}
   ${(() => { const ids = Object.keys(hidden); if (!ids.length || saved) return ""; return `<details class="other"><summary>Hidden jobs (${ids.length}) – hidden by you</summary>${ids.map(id => `<div class="pad small">${esc(hidden[id].title||id)} · ${esc(hidden[id].employer||"")} – <b>${esc(hidden[id].why)}</b> <button class="chip" data-unhide="${esc(id)}">Show again</button></div>`).join("")}</details>`; })()}
   <p class="small pad">Salary filter: hourly rates converted at 37.5 h/week. Pay per shift or unclear pay is never filtered out, and goes last when sorting by pay. Jobs with no distance go last when sorting by nearest. Distances are straight-line from home.</p>`;
 }
