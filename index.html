@@ -162,6 +162,15 @@ function needsLevel3(text){
   }
   return false;
 }
+const SENIOR_RE = /senior|\bhead\b|\blead\b|supervisor|team leader|deputy|manager|practitioner|nursing associate|apprentice|technician|therapy assistant|doctor'?s assistant|department assistant|science assistant/i;
+const PLAIN_CARE_RE = /^(?!.*(senior|head|lead|manager|coordinator|co-ordinator)).*(care assistant|carer|care worker|health ?care assistant|hca|support worker)/i;
+function yearsRequired(j){
+  if (PLAIN_CARE_RE.test(j.title)) return 0; // she has 8 years in care
+  const m = (j.description||"").match(/(minimum of|at least|min\.?)\s*(\d+)\s*\+?\s*years?/i);
+  return m ? +m[2] : 0;
+}
+const CHILD_TITLE_RE = /child|young people|youth|paediatric|pediatric|\bcamhs\b|\bsen\b|school|nursery|adolescent|teen|baby|babies|maternity|neonatal/i;
+const CHILD_TEXT_RE = /children and young people|young people (aged|with|who)|experience (of |in )?(working )?with children|working with children|children'?s (services|home|unit|ward)|childcare|paediatric|pediatric|\bcamhs\b|\bsen\b|special educational|aged (between )?\d+ ?(-|to) ?1[0-9]|under 18s?|adolescen|safeguarding children/i;
 const HOMECARE_RE = /home ?care|domiciliary|homecare|community care|visiting clients|in their own homes/i;
 const RELEVANT = /care assistant|health ?care assistant|\bhca\b|support worker|rehabilitation assistant|therapy assistant|phlebotom|housekeep|domestic|activities|nursing associate|assistant practitioner|healthcare technician|department assistant|podiatry apprentic|porter|clinical support|maternity support|theatre support|ward clerk|care worker|\bcarer\b|doctor'?s assistant|dietetic assistant|physiotherapy assistant|healthcare science assistant/i;
 const NOT_RELEVANT = /catering|kitchen|chef|kitchen porter|domestic abuse|refuge|teaching assistant|receptionist|registered nurse|staff nurse|consultant|psychiatrist|\bgp\b|team lead|manager|psychologist|volunteer/i;
@@ -261,6 +270,10 @@ function ruleBreaks(j){
   if (/\bnight/.test(j.title.toLowerCase())) r.push("Night shifts");
   if (CAR_RE.test(text)) r.push("Needs a car / driving");
   if (needsLevel3(j.title+" "+(j.description||""))) r.push("Asks for Level 3+ qualification");
+  if (CHILD_TITLE_RE.test(j.title) || CHILD_TEXT_RE.test(j.description||"")) r.push("Children's work – needs experience with children");
+  if (SENIOR_RE.test(j.title)) r.push("Senior or specialist role – usually needs higher qualifications or experience");
+  else if (j.source==="NHS Jobs" && (() => { const n = (String(j.salary).replace(/,/g,"").match(/\d+(\.\d+)?/)||[])[0]; return n && +n >= 28392; })()) r.push("NHS Band 4 or above – usually needs Level 3");
+  const yrs = yearsRequired(j); if (yrs >= 2) r.push(`Asks for at least ${yrs} years' experience in the role`);
   if (j.miles != null && j.miles > RADIUS) r.push(`Over ${RADIUS} miles`);
   return r;
 }
@@ -365,7 +378,7 @@ function detailHTML(j){
       <dt>Contract</dt><dd>${esc(j.type||"not stated")}</dd>
       <dt>Closing date</dt><dd>${j.closeDate? fmtDate(j.closeDate)+(d<3?` <span class="closing">(${d} day${d===1?"":"s"} left)</span>`:` (${d} days left)`):"not stated"}</dd>
       <dt>Posted</dt><dd>${fmtDate(j.postDate)}</dd>
-      <dt>Source</dt><dd>${esc(j.source)}${j.static?" – saved list from 13 Nov 2026 (live Reed search unavailable)":""}${j.source==="Reed"&&!j.static&&!j.detailed?" – full advert not loaded yet; pay under £100 shown as per hour":""}${j.source==="Reed"&&j.detailed?" – full advert checked for driving requirements":""}${j.source==="NHS Jobs"?" – only the advert's opening lines are checked for driving requirements":""}</dd>
+      <dt>Source</dt><dd>${esc(j.source)}${j.static?" – saved list from 13 Nov 2026 (live Reed search unavailable)":""}${j.source==="Reed"&&!j.static&&!j.detailed?" – full advert not loaded yet; pay under £100 shown as per hour":""}${j.source==="Reed"&&j.detailed?" – full advert checked for driving requirements":""}${j.source==="NHS Jobs"?" – NHS Jobs only shares the advert's opening lines, so check the person specification on the advert before applying":""}</dd>
       ${breaks.length?`<dt>Breaks your rules</dt><dd class="closing">${breaks.map(esc).join(", ")}</dd>`:""}
     </dl>
     ${j.description?`<p class="desc">${esc(j.description.length>1200?j.description.slice(0,1200)+"…":j.description)}</p>`:""}
@@ -421,7 +434,7 @@ function viewJobs(saved){
     <div class="status">${statusLine()}</div>
   </div>
   ${main.length? main.map(rowHTML).join("") : `<div class="empty">${saved?"No saved jobs. Tap the star on a job to save it.":"No jobs match these filters."}</div>`}
-  ${other.length?`<details class="other" ${store.get("otherOpen",false)?"open":""}><summary>Other options (${other.length}) – break one of your rules: bank, nights, car/licence needed, Level 3 required, or over ${RADIUS} miles</summary>${other.map(rowHTML).join("")}</details>`:""}
+  ${other.length?`<details class="other" ${store.get("otherOpen",false)?"open":""}><summary>Other options (${other.length}) – break one of your rules: bank, nights, car/licence needed, higher qualifications, senior/specialist role, children's work, or over ${RADIUS} miles</summary>${other.map(rowHTML).join("")}</details>`:""}
   <p class="small pad">Salary filter: hourly rates converted at 37.5 h/week. Pay per shift or unclear pay is never filtered out, and goes last when sorting by pay. Jobs with no distance go last when sorting by nearest. Distances are straight-line from home.</p>`;
 }
 
