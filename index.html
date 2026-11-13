@@ -152,6 +152,17 @@ const REED_STATIC = [
 ];
 
 /* Which job titles count as care / hospital-support work (her field + related roles) */
+const CAR_RE = /drivers? only|driving licen[cs]e|driver'?s licen[cs]e|full (uk |clean |manual )?licen[cs]e|uk licen[cs]e|must (be able to )?drive|must: ?drive|ability to drive|able to drive|need to drive|will drive|driving is essential|car (is )?essential|car driver|own car|own vehicle|own transport|access to a (car|vehicle)|car owner|business (car )?insurance|mileage (is )?paid|paid mileage|mileage allowance/i;
+const L3_RE = /(level ?3|nvq ?3|qcf ?3|rqf ?3|level three|level [45]\b)/ig;
+const L3_OK_RE = /desirable|preferred|advantage|beneficial|bonus|ideally|willing to|work(ing)? towards|we('ll| will) (support|fund|help)|support you|opportunit|progress|funded|training (to|towards)|or equivalent experience|not essential|career path|develop/i;
+function needsLevel3(text){
+  for (const m of text.matchAll(L3_RE)){
+    const around = text.slice(Math.max(0, m.index - 90), m.index + 90);
+    if (!L3_OK_RE.test(around)) return true;
+  }
+  return false;
+}
+const HOMECARE_RE = /home ?care|domiciliary|homecare|community care|visiting clients|in their own homes/i;
 const RELEVANT = /care assistant|health ?care assistant|\bhca\b|support worker|rehabilitation assistant|therapy assistant|phlebotom|housekeep|domestic|activities|nursing associate|assistant practitioner|healthcare technician|department assistant|podiatry apprentic|porter|clinical support|maternity support|theatre support|ward clerk|care worker|\bcarer\b|doctor'?s assistant|dietetic assistant|physiotherapy assistant|healthcare science assistant/i;
 const NOT_RELEVANT = /catering|kitchen|chef|kitchen porter|domestic abuse|refuge|teaching assistant|receptionist|registered nurse|staff nurse|consultant|psychiatrist|\bgp\b|team lead|manager|psychologist|volunteer/i;
 
@@ -248,7 +259,8 @@ function ruleBreaks(j){
   const text = (j.title+" "+(j.description||"")).toLowerCase();
   if (/\bbank\b/i.test(j.title) || /bank/i.test(j.type||"")) r.push("Bank");
   if (/\bnight/.test(j.title.toLowerCase())) r.push("Night shifts");
-  if (/driver|driving licen|own car|car owner|car essential|access to a car/.test(text)) r.push("Needs a car / driving");
+  if (CAR_RE.test(text)) r.push("Needs a car / driving");
+  if (needsLevel3(j.title+" "+(j.description||""))) r.push("Asks for Level 3+ qualification");
   if (j.miles != null && j.miles > RADIUS) r.push(`Over ${RADIUS} miles`);
   return r;
 }
@@ -275,6 +287,7 @@ async function loadFeed(){
     const d = await r.json();
     if (!r.ok || d.error) throw new Error(d.error || ("HTTP "+r.status));
     feed = d; feedState = "live";
+    loadReedDetails();
     try{ localStorage.setItem("cj_lastfeed", JSON.stringify(d)); }catch(e){}
   }catch(e){
     feedError = e.name === "AbortError" ? "timed out" : e.message;
@@ -285,6 +298,28 @@ async function loadFeed(){
   render();
 }
 
+async function loadReedDetails(){
+  const ids = allJobs().filter(j => j.source === "Reed" && !j.detailed).map(j => j.id);
+  const byId = Object.fromEntries((feed?.jobs || []).map(j => [j.id, j]));
+  for (let i = 0; i < ids.length; i += 40){
+    try{
+      const r = await fetch(FEED_URL.replace(/\/jobs$/, "/reed-details") + "?ids=" + ids.slice(i, i+40).join(","));
+      if (!r.ok) continue;
+      const d = await r.json();
+      for (const [id, x] of Object.entries(d)){
+        const j = byId[id]; if (!j) continue;
+        if (x.description) j.description = x.description;
+        const hours = [x.fullTime && "full time", x.partTime && "part time"].filter(Boolean).join(" or ");
+        if (x.contractType) j.type = x.contractType + (hours ? ", " + hours : "");
+        if (x.salary) j.salary = x.salary;
+        j.detailed = true;
+      }
+      render();
+    }catch(e){}
+  }
+}
+
+window.__dbg = () => ({CAR_RE, HOMECARE_RE, needsLevel3});
 /* ---------- UI state ---------- */
 let view = store.get("view", "jobs"), openId = null, q = "";
 { const h = location.hash.slice(1); if (["jobs","saved","careers","questions","sites","notes"].includes(h)) view = h; }
@@ -313,7 +348,7 @@ function rowHTML(j){
   return `<div class="row ${read[j.id]?"":"unread"}" data-id="${esc(j.id)}">
     <button class="star ${stars[j.id]?"on":""}" data-star="${esc(j.id)}" aria-label="Save job"><svg width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="${stars[j.id]?"M12 17.3 18.2 21l-1.6-7L22 9.2l-7.2-.6L12 2 9.2 8.6 2 9.2 7.4 14l-1.6 7z":"M22 9.2l-7.2-.6L12 2 9.2 8.6 2 9.2 7.4 14l-1.6 7L12 17.3l6.2 3.7-1.6-7L22 9.2zM12 15.4l-3.8 2.3 1-4.3-3.3-2.9 4.4-.4L12 6.1l1.7 4 4.4.4-3.3 2.9 1 4.3-3.8-2.3z"}"/></svg></button>
     <div class="emp">${esc(j.employer)}</div>
-    <div class="ttl">${esc(j.title)} <span>– ${esc(fmtSal(j.salary)||"salary not stated")} · ${esc((j.locations||[])[0]||"")}</span>${breaks.map(b=>`<span class="flag">${esc(b)}</span>`).join("")}${notes[j.id]?'<span class="tag">note</span>':""}</div>
+    <div class="ttl">${esc(j.title)} <span>– ${esc(fmtSal(j.salary)||"salary not stated")} · ${esc((j.locations||[])[0]||"")}</span>${breaks.map(b=>`<span class="flag">${esc(b)}</span>`).join("")}${notes[j.id]?'<span class="tag">note</span>':""}${!breaks.length && HOMECARE_RE.test(j.title+" "+(j.description||""))?'<span class="tag">home care – check if a car is needed</span>':""}</div>
     <div class="meta">${[miles, close].filter(Boolean).join(" · ")}</div>
   </div>${openId===j.id? detailHTML(j):""}`;
 }
@@ -330,10 +365,10 @@ function detailHTML(j){
       <dt>Contract</dt><dd>${esc(j.type||"not stated")}</dd>
       <dt>Closing date</dt><dd>${j.closeDate? fmtDate(j.closeDate)+(d<3?` <span class="closing">(${d} day${d===1?"":"s"} left)</span>`:` (${d} days left)`):"not stated"}</dd>
       <dt>Posted</dt><dd>${fmtDate(j.postDate)}</dd>
-      <dt>Source</dt><dd>${esc(j.source)}${j.static?" – saved list from 13 Nov 2026 (live Reed search unavailable)":""}${j.source==="Reed"&&!j.static?" – Reed's data gives no pay period; figures under £100 are shown as per hour":""}</dd>
+      <dt>Source</dt><dd>${esc(j.source)}${j.static?" – saved list from 13 Nov 2026 (live Reed search unavailable)":""}${j.source==="Reed"&&!j.static&&!j.detailed?" – full advert not loaded yet; pay under £100 shown as per hour":""}${j.source==="Reed"&&j.detailed?" – full advert checked for driving requirements":""}${j.source==="NHS Jobs"?" – only the advert's opening lines are checked for driving requirements":""}</dd>
       ${breaks.length?`<dt>Breaks your rules</dt><dd class="closing">${breaks.map(esc).join(", ")}</dd>`:""}
     </dl>
-    ${j.description?`<p class="desc">${esc(j.description)}</p>`:""}
+    ${j.description?`<p class="desc">${esc(j.description.length>1200?j.description.slice(0,1200)+"…":j.description)}</p>`:""}
     ${j.note?`<p class="desc"><b>Note:</b> ${esc(j.note)}</p>`:""}
     <a class="btn" href="${esc(j.url)}" target="_blank" rel="noopener">Apply ↗</a>
     <label class="notelabel" for="n-${esc(j.id)}">Application notes</label>
@@ -386,7 +421,7 @@ function viewJobs(saved){
     <div class="status">${statusLine()}</div>
   </div>
   ${main.length? main.map(rowHTML).join("") : `<div class="empty">${saved?"No saved jobs. Tap the star on a job to save it.":"No jobs match these filters."}</div>`}
-  ${other.length?`<details class="other" ${store.get("otherOpen",false)?"open":""}><summary>Other options (${other.length}) – break one of your rules: bank, nights, car needed, or over ${RADIUS} miles</summary>${other.map(rowHTML).join("")}</details>`:""}
+  ${other.length?`<details class="other" ${store.get("otherOpen",false)?"open":""}><summary>Other options (${other.length}) – break one of your rules: bank, nights, car/licence needed, Level 3 required, or over ${RADIUS} miles</summary>${other.map(rowHTML).join("")}</details>`:""}
   <p class="small pad">Salary filter: hourly rates converted at 37.5 h/week. Pay per shift or unclear pay is never filtered out, and goes last when sorting by pay. Jobs with no distance go last when sorting by nearest. Distances are straight-line from home.</p>`;
 }
 
