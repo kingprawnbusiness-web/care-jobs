@@ -139,7 +139,7 @@ const NMW_YEAR = Math.round(NMW_HOURLY * 37.5 * 52.143); // full time, 37.5 h/we
 
 /* Jobs found on Reed (page 1 of "healthcare assistant" within 15 miles of Lewes, read 13 Nov 2026).
    Reed shows no closing dates on its result cards. Distance = straight line to the town centre. */
-const REED = [
+const REED_STATIC = [
  {id:"reed-57520141",title:"Care Assistant - Bank - Care Home",employer:"Barchester Healthcare",type:"Bank (listed as Permanent, full-time or part-time)",salary:"£15.91 per hour",closeDate:"",postDate:"2026-11-03",url:"https://www.reed.co.uk/jobs/care-assistant-bank-care-home/57520141",locations:["Lewes, East Sussex"],miles:0.7,source:"Reed"},
  {id:"reed-57410056",title:"Care Assistant for Early Mornings",employer:"Superior Healthcare Group",type:"Permanent, full-time",salary:"£14.30 - £16.50 per hour",closeDate:"",postDate:"2026-11-12",url:"https://www.reed.co.uk/jobs/care-assistant-for-early-mornings/57410056",locations:["Eastbourne, East Sussex"],miles:14.3,source:"Reed"},
  {id:"reed-57556902",title:"Care Assistant",employer:"Alina Homecare",type:"Permanent, full-time or part-time",salary:"£14.40 - £15.65 per hour",closeDate:"",postDate:"2026-11-11",url:"https://www.reed.co.uk/jobs/care-assistant/57556902",locations:["Brighton, East Sussex"],miles:6.7,source:"Reed",note:"Home care. Advert card does not say whether a car is needed – check before applying."},
@@ -153,7 +153,7 @@ const REED = [
 
 /* Which job titles count as care / hospital-support work (her field + related roles) */
 const RELEVANT = /care assistant|health ?care assistant|\bhca\b|support worker|rehabilitation assistant|therapy assistant|phlebotom|housekeep|domestic|activities|nursing associate|assistant practitioner|healthcare technician|catering assistant|department assistant|podiatry apprentic|porter|clinical support|maternity support|theatre support|ward clerk|care worker|\bcarer\b|doctor'?s assistant|dietetic assistant|physiotherapy assistant|healthcare science assistant/i;
-const NOT_RELEVANT = /receptionist|registered nurse|staff nurse|consultant|psychiatrist|\bgp\b|team lead|manager|psychologist|volunteer/i;
+const NOT_RELEVANT = /kitchen porter|domestic abuse|refuge|teaching assistant|receptionist|registered nurse|staff nurse|consultant|psychiatrist|\bgp\b|team lead|manager|psychologist|volunteer/i;
 
 /* Career options – pay from NHS Agenda for Change 2026/27 (England) or National Careers Service */
 const CAREERS = [
@@ -255,9 +255,13 @@ function ruleBreaks(j){
 /* ---------- jobs data ---------- */
 let feed = null, feedState = "loading", feedError = "";
 function allJobs(){
-  const nhs = (feed?.jobs || SNAPSHOT?.jobs || []).map(j => ({...j, source:"NHS Jobs"}));
-  return [...nhs, ...REED]
+  const live = feed?.jobs || SNAPSHOT?.jobs || [];
+  const base = live.map(j => ({...j, source: j.source || "NHS Jobs"}));
+  const hasReed = base.some(j => j.source === "Reed");
+  const reedIds = new Set(base.map(j => j.id));
+  return [...base, ...(hasReed ? [] : REED_STATIC.map(j => ({...j, static:true})).filter(j => !reedIds.has(j.id)))]
     .filter(j => RELEVANT.test(j.title) && !NOT_RELEVANT.test(j.title))
+    .filter((j, i, arr) => { const k = (j.title+"|"+j.employer+"|"+(j.locations||[])[0]+"|"+j.salary).toLowerCase(); return arr.findIndex(x => (x.title+"|"+x.employer+"|"+(x.locations||[])[0]+"|"+x.salary).toLowerCase() === k) === i; })
     .filter(j => { const d = daysLeft(j.closeDate); return d === null || d >= 0; })
     .sort((a,b) => (b.postDate||"").localeCompare(a.postDate||""));
 }
@@ -320,12 +324,12 @@ function detailHTML(j){
     <div class="small">${esc(j.employer)} · ${esc(j.source)}</div>
     <dl class="facts">
       <dt>Location</dt><dd>${esc((j.locations||[]).join("; ")||"not stated")}</dd>
-      <dt>Distance</dt><dd>${j.miles==null?"not stated":j.miles+" miles (straight line from home"+(j.source==="Reed"?" to town centre":"")+"; bus/train journey is longer)"}</dd>
+      <dt>Distance</dt><dd>${j.miles==null?"not stated":j.miles+" miles (straight line from home"+((j.milesApprox||j.static)?" to the town centre":"")+"; bus/train journey is longer)"}</dd>
       <dt>Salary</dt><dd>${esc(fmtSal(j.salary)||"not stated")}${/^£\d+(\.\d+)?$/.test(j.salary)&&+j.salary.slice(1)>=100&&+j.salary.slice(1)<5000?" (period not stated in advert)":""}</dd>
       <dt>Contract</dt><dd>${esc(j.type||"not stated")}</dd>
       <dt>Closing date</dt><dd>${j.closeDate? fmtDate(j.closeDate)+(d<3?` <span class="closing">(${d} day${d===1?"":"s"} left)</span>`:` (${d} days left)`):"not stated"}</dd>
       <dt>Posted</dt><dd>${fmtDate(j.postDate)}</dd>
-      <dt>Source</dt><dd>${esc(j.source)}${j.source==="Reed"?" – read 13 Nov 2026, not refreshed automatically":""}</dd>
+      <dt>Source</dt><dd>${esc(j.source)}${j.static?" – saved list from 13 Nov 2026 (live Reed search unavailable)":""}${j.source==="Reed"&&!j.static?" – Reed's data gives no pay period; figures under £100 are shown as per hour":""}</dd>
       ${breaks.length?`<dt>Breaks your rules</dt><dd class="closing">${breaks.map(esc).join(", ")}</dd>`:""}
     </dl>
     ${j.description?`<p class="desc">${esc(j.description)}</p>`:""}
@@ -352,7 +356,7 @@ function statusLine(){
   const when = feed ? new Date(feed.fetched) : (SNAPSHOT ? new Date(SNAPSHOT.fetched) : null);
   const dstr = when ? when.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short",year:"numeric"}) + " " + when.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}) : "";
   if (feedState === "loading") return `Checking NHS Jobs for new adverts… Showing jobs found on <b>${esc(dstr)}</b> meanwhile.`;
-  if (feedState === "live") return `Jobs found on <b>${esc(dstr)}</b> · NHS Jobs live (${feed.count} adverts within ${RADIUS} miles, care roles shown) + Reed list from 13 Nov 2026.`;
+  if (feedState === "live"){ const sr = feed.sources || {}; return `Jobs found on <b>${esc(dstr)}</b> · live from NHS Jobs (${sr.nhs?.count ?? feed.count} adverts) and Reed (${sr.reed?.count ?? 0} adverts) within ${RADIUS} miles; care roles shown.${sr.reed?.error?" Reed not reached: "+esc(sr.reed.error)+".":""}`; }
   return `Jobs found on <b>${esc(dstr)}</b> · NHS Jobs could not be reached now (${esc(feedError)}); showing the last saved list. <button class="chip" id="retry">Try again</button>`;
 }
 
