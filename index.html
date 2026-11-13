@@ -270,6 +270,10 @@ function ruleBreaks(j){
   if (/\bnight/.test(j.title.toLowerCase())) r.push("Night shifts");
   if (CAR_RE.test(text)) r.push("Needs a car / driving");
   if (needsLevel3(j.title+" "+(j.description||""))) r.push("Asks for Level 3+ qualification");
+  const nf = j.source==="NHS Jobs" ? (nhsFlags[j.id]||[]) : [];
+  if (nf.includes("licence") && !r.includes("Needs a car / driving")) r.push("Full advert mentions a driving licence");
+  if (nf.includes("nvq")) r.push("Full advert mentions NVQ/QCF – may need Level 3, check");
+  if (nf.includes("children") && !CHILD_TITLE_RE.test(j.title)) r.push("Full advert mentions children");
   if (CHILD_TITLE_RE.test(j.title) || CHILD_TEXT_RE.test(j.description||"")) r.push("Children's work – needs experience with children");
   if (SENIOR_RE.test(j.title)) r.push("Senior or specialist role – usually needs higher qualifications or experience");
   else if (j.source==="NHS Jobs" && (() => { const n = (String(j.salary).replace(/,/g,"").match(/\d+(\.\d+)?/)||[])[0]; return n && +n >= 28392; })()) r.push("NHS Band 4 or above – usually needs Level 3");
@@ -301,6 +305,7 @@ async function loadFeed(){
     if (!r.ok || d.error) throw new Error(d.error || ("HTTP "+r.status));
     feed = d; feedState = "live";
     loadReedDetails();
+    loadNhsFlags();
     try{ localStorage.setItem("cj_lastfeed", JSON.stringify(d)); }catch(e){}
   }catch(e){
     feedError = e.name === "AbortError" ? "timed out" : e.message;
@@ -311,6 +316,14 @@ async function loadFeed(){
   render();
 }
 
+let nhsFlags = store.get("nhsflags", {});
+async function loadNhsFlags(){
+  try{
+    const r = await fetch(FEED_URL.replace(/\/jobs$/, "/nhs-flags"));
+    if (!r.ok) return;
+    nhsFlags = await r.json(); store.set("nhsflags", nhsFlags); render();
+  }catch(e){}
+}
 async function loadReedDetails(){
   const ids = allJobs().filter(j => j.source === "Reed" && !j.detailed).map(j => j.id);
   const byId = Object.fromEntries((feed?.jobs || []).map(j => [j.id, j]));
@@ -453,36 +466,39 @@ function viewCareers(){
   <p class="small pad">NHS pay: Agenda for Change 2026/27, England (NHS Employers). Minimum wage: £12.71/h from 1 April 2026 (gov.uk).</p>`;
 }
 
+const sel = id => { const v = answers[id]; return Array.isArray(v) ? v : (v ? [v] : []); };
+const maxOf = id => sel(id).length ? Math.max(...sel(id).map(Number)) : null;
 function score(c){
-  const A = answers, a = c.a, reasons = []; let s = 0;
-  if (A.set && A.set !== "any"){ if (a.set === A.set){ s+=3; reasons.push("setting you chose"); } else if (a.set === "mixed"){ s+=1; } else s-=1; }
-  if (A.care){ const diff = Math.abs(+A.care - a.care); s += 2 - diff; if (diff===0) reasons.push("matches how much personal care you want"); }
-  if (A.clin){ const v=+A.clin; if (v===0 && a.clin>=2){ s-=4; } else if (v>=2 && a.clin>=2){ s+=2; reasons.push("clinical tasks"); } }
-  if (A.study){ const v=+A.study; if (a.study > v+0.5){ s -= 3*(a.study - v); } else if (v>=3 && a.study>=2){ s+=1; reasons.push("training leads to a qualification"); } }
-  if (A.maths){ if (a.maths && +A.maths===0){ s-=4; } else if (a.maths && +A.maths>0) reasons.push("needs Maths Level 2, which you'd take"); }
-  if (A.prio==="pay"){ s += (c.pay[1]-25000)/3000; if (c.pay[1]>=29000) reasons.push("higher pay ceiling"); }
-  if (A.prio==="prog"){ s += a.prog; if (a.prog>=3) reasons.push("clear progression route"); }
-  if (A.prio==="hours" && !a.night){ s+=2; reasons.push("mostly daytime hours"); }
-  if (A.prio==="stable" && (a.set==="hospital"||a.set==="mixed")){ s+=1; reasons.push("NHS contract"); }
-  if (A.night && +A.night===0 && a.night){ s-=2; }
-  if (A.phys && +A.phys===0 && a.phys>=2){ s-=2; } else if (A.phys && +A.phys===0 && a.phys===0) reasons.push("lighter physical work");
-  if (A.people && A.people!=="any"){ if (a.people===A.people){ s+=2; reasons.push("works with the people you chose"); } else if (a.people!=="any") s-=1; }
-  if (A.team && a.team===A.team){ s+=1; reasons.push("team size you prefer"); }
-  if (A.clean){ if (+A.clean===0 && a.clean>=2) s-=4; else if (+A.clean===2 && a.clean>=2) s+=1; }
+  const a = c.a, reasons = []; let s = 0;
+  const set = sel("set"); if (set.length && !set.includes("any")){ if (set.includes(a.set)){ s+=3; reasons.push("setting you chose"); } else if (a.set === "mixed"){ s+=1; } else s-=1; }
+  const care = sel("care").map(Number); if (care.length){ const diff = Math.min(...care.map(v => Math.abs(v - a.care))); s += 2 - diff; if (diff===0) reasons.push("matches how much personal care you want"); }
+  const clin = maxOf("clin"); if (clin!==null){ if (clin===0 && a.clin>=2){ s-=4; } else if (clin>=2 && a.clin>=2){ s+=2; reasons.push("clinical tasks"); } }
+  const study = maxOf("study"); if (study!==null){ if (a.study > study+0.5){ s -= 3*(a.study - study); } else if (study>=3 && a.study>=2){ s+=1; reasons.push("training leads to a qualification"); } }
+  const maths = maxOf("maths"); if (maths!==null){ if (a.maths && maths===0){ s-=4; } else if (a.maths && maths>0) reasons.push("needs Maths Level 2, which you'd take"); }
+  const prio = sel("prio");
+  if (prio.includes("pay")){ s += (c.pay[1]-25000)/3000; if (c.pay[1]>=29000) reasons.push("higher pay ceiling"); }
+  if (prio.includes("prog")){ s += a.prog; if (a.prog>=3) reasons.push("clear progression route"); }
+  if (prio.includes("hours") && !a.night){ s+=2; reasons.push("mostly daytime hours"); }
+  if (prio.includes("stable") && (a.set==="hospital"||a.set==="mixed")){ s+=1; reasons.push("NHS contract"); }
+  const night = maxOf("night"); if (night===0 && a.night){ s-=2; }
+  const phys = maxOf("phys"); if (phys===0 && a.phys>=2){ s-=2; } else if (phys===0 && a.phys===0) reasons.push("lighter physical work");
+  const people = sel("people"); if (people.length && !people.includes("any")){ if (people.includes(a.people)){ s+=2; reasons.push("works with the people you chose"); } else if (a.people!=="any") s-=1; }
+  if (sel("team").includes(a.team)){ s+=1; reasons.push("team size you prefer"); }
+  const clean = maxOf("clean"); if (clean!==null){ if (clean===0 && a.clean>=2) s-=4; else if (clean===2 && a.clean>=2) s+=1; }
   if (c.flag && /driving/i.test(c.flag)) s-=1.5;
   return {c, s, reasons};
 }
 function viewQuestions(){
-  const answered = QUESTIONS.filter(x => answers[x.id]).length;
-  return `<div class="bar"><h1>Questions</h1><button class="btn" id="match">Match</button><button class="btn ghost" id="dl">Download answers (.txt)</button><div class="status">${answered} of ${QUESTIONS.length} answered · saved automatically on this phone.</div></div>
+  const answered = QUESTIONS.filter(x => x.free ? answers[x.id] : sel(x.id).length).length;
+  return `<div class="bar"><h1>Questions</h1><button class="btn" id="match">Match</button><button class="btn ghost" id="dl">Download answers (.txt)</button><div class="status">${answered} of ${QUESTIONS.length} answered · tick as many answers as apply · saved automatically on this phone.</div></div>
   <div id="matchout"></div>
   ${QUESTIONS.map((x,i) => `<div class="q"><div class="qt">${i+1}. ${esc(x.t)}</div>${x.free
     ? `<textarea data-ans="${x.id}">${esc(answers[x.id]||"")}</textarea>`
-    : x.o.map(([v,l]) => `<label class="opt"><input type="radio" name="${x.id}" value="${esc(v)}" data-ans="${x.id}" ${answers[x.id]===v?"checked":""}> ${esc(l)}</label>`).join("")}</div>`).join("")}`;
+    : x.o.map(([v,l]) => `<label class="opt"><input type="checkbox" name="${x.id}" value="${esc(v)}" data-ans="${x.id}" ${sel(x.id).includes(v)?"checked":""}> ${esc(l)}</label>`).join("")}</div>`).join("")}`;
 }
 function showMatch(){
   const res = CAREERS.map(score).sort((a,b)=>b.s-a.s).slice(0,6);
-  const n = QUESTIONS.filter(x=>!x.free && answers[x.id]).length;
+  const n = QUESTIONS.filter(x=>!x.free && sel(x.id).length).length;
   $("#matchout").innerHTML = `<div class="match"><b>Top 6 career options</b> (based on ${n} of 11 multiple-choice answers)<ol>${res.map(r=>`<li><b>${esc(r.c.role)}</b> – ${esc(r.c.payText)}<br><span class="small">${r.reasons.length? "Why: "+esc([...new Set(r.reasons)].join("; ")) : "Fewest clashes with your answers."}${r.c.flag?" · Note: "+esc(r.c.flag):""}</span></li>`).join("")}</ol></div>`;
   $("#matchout").scrollIntoView({behavior:"smooth"});
 }
@@ -490,7 +506,7 @@ function downloadAnswers(){
   const lines = ["Care Jobs – answers", "Saved " + new Date().toLocaleString("en-GB"), ""];
   QUESTIONS.forEach((x,i) => {
     let v = answers[x.id] || "";
-    if (!x.free){ const o = x.o.find(o=>o[0]===v); v = o ? o[1] : ""; }
+    if (!x.free){ v = sel(x.id).map(val => (x.o.find(o=>o[0]===val)||[,""])[1]).filter(Boolean).join("; "); }
     lines.push(`${i+1}. ${x.t}`, "   " + (v || "(not answered)"), "");
   });
   const blob = new Blob([lines.join("\n")], {type:"text/plain"});
@@ -538,7 +554,7 @@ document.addEventListener("toggle", e => { if (e.target.matches?.("details.other
 document.addEventListener("change", e => {
   const t = e.target;
   if (t.id==="f-sort"){ filt.sort = t.value; } else if (t.id==="f-dist"){ filt.dist = t.value; } else if (t.id==="f-sal"){ filt.sal = t.value; } else if (t.id==="f-con"){ filt.contract = t.value; }
-  else if (t.dataset.ans && t.type==="radio"){ answers[t.dataset.ans] = t.value; store.set("answers", answers); return; }
+  else if (t.dataset.ans && t.type==="checkbox"){ const id = t.dataset.ans; answers[id] = [...document.querySelectorAll(`input[type=checkbox][data-ans="${id}"]:checked`)].map(x => x.value); store.set("answers", answers); return; }
   else return;
   store.set("filters", filt); render();
 });
