@@ -152,8 +152,8 @@ const REED_STATIC = [
 ];
 
 /* Which job titles count as care / hospital-support work (her field + related roles) */
-const RELEVANT = /care assistant|health ?care assistant|\bhca\b|support worker|rehabilitation assistant|therapy assistant|phlebotom|housekeep|domestic|activities|nursing associate|assistant practitioner|healthcare technician|catering assistant|department assistant|podiatry apprentic|porter|clinical support|maternity support|theatre support|ward clerk|care worker|\bcarer\b|doctor'?s assistant|dietetic assistant|physiotherapy assistant|healthcare science assistant/i;
-const NOT_RELEVANT = /kitchen porter|domestic abuse|refuge|teaching assistant|receptionist|registered nurse|staff nurse|consultant|psychiatrist|\bgp\b|team lead|manager|psychologist|volunteer/i;
+const RELEVANT = /care assistant|health ?care assistant|\bhca\b|support worker|rehabilitation assistant|therapy assistant|phlebotom|housekeep|domestic|activities|nursing associate|assistant practitioner|healthcare technician|department assistant|podiatry apprentic|porter|clinical support|maternity support|theatre support|ward clerk|care worker|\bcarer\b|doctor'?s assistant|dietetic assistant|physiotherapy assistant|healthcare science assistant/i;
+const NOT_RELEVANT = /catering|kitchen|chef|kitchen porter|domestic abuse|refuge|teaching assistant|receptionist|registered nurse|staff nurse|consultant|psychiatrist|\bgp\b|team lead|manager|psychologist|volunteer/i;
 
 /* Career options – pay from NHS Agenda for Change 2026/27 (England) or National Careers Service */
 const CAREERS = [
@@ -246,6 +246,7 @@ function contractOf(j){
 function ruleBreaks(j){
   const r = [];
   const text = (j.title+" "+(j.description||"")).toLowerCase();
+  if (/\bbank\b/i.test(j.title) || /bank/i.test(j.type||"")) r.push("Bank");
   if (/\bnight/.test(j.title.toLowerCase())) r.push("Night shifts");
   if (/driver|driving licen|own car|car owner|car essential|access to a car/.test(text)) r.push("Needs a car / driving");
   if (j.miles != null && j.miles > RADIUS) r.push(`Over ${RADIUS} miles`);
@@ -385,7 +386,7 @@ function viewJobs(saved){
     <div class="status">${statusLine()}</div>
   </div>
   ${main.length? main.map(rowHTML).join("") : `<div class="empty">${saved?"No saved jobs. Tap the star on a job to save it.":"No jobs match these filters."}</div>`}
-  ${other.length?`<details class="other" ${store.get("otherOpen",false)?"open":""}><summary>Other options (${other.length}) – break one of your rules: nights, car needed, or over ${RADIUS} miles</summary>${other.map(rowHTML).join("")}</details>`:""}
+  ${other.length?`<details class="other" ${store.get("otherOpen",false)?"open":""}><summary>Other options (${other.length}) – break one of your rules: bank, nights, car needed, or over ${RADIUS} miles</summary>${other.map(rowHTML).join("")}</details>`:""}
   <p class="small pad">Salary filter: hourly rates converted at 37.5 h/week. Pay per shift or unclear pay is never filtered out, and goes last when sorting by pay. Jobs with no distance go last when sorting by nearest. Distances are straight-line from home.</p>`;
 }
 
