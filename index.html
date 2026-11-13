@@ -364,11 +364,20 @@ function viewJobs(saved){
   const jobs = allJobs();
   let list = saved ? jobs.filter(j => stars[j.id]) : jobs;
   list = filtered(list);
+  const sortBy = filt.sort || "new";
+  const big = 1e9, cmp = {
+    new: (a,b) => (b.postDate||"").localeCompare(a.postDate||""),
+    near: (a,b) => (a.miles ?? big) - (b.miles ?? big),
+    closing: (a,b) => (daysLeft(a.closeDate) ?? big) - (daysLeft(b.closeDate) ?? big),
+    pay: (a,b) => (annual(b.salary) ?? -1) - (annual(a.salary) ?? -1),
+  }[sortBy];
+  list = [...list].sort(cmp);
   const main = list.filter(j => !ruleBreaks(j).length);
   const other = list.filter(j => ruleBreaks(j).length);
   const contracts = [...new Set(jobs.map(contractOf))].sort();
   return `<div class="bar">
     <h1>${saved?"Saved":"Jobs"}</h1>
+    <select id="f-sort" aria-label="Sort"><option value="new">Newest first</option><option value="near">Nearest first</option><option value="closing">Closing soonest</option><option value="pay">Highest pay</option></select>
     ${saved?"":`<select id="f-dist" aria-label="Distance"><option value="15">Within 15 miles</option><option value="10">Within 10 miles</option><option value="5">Within 5 miles</option><option value="3">Within 3 miles</option><option value="any">Any distance</option></select>
     <select id="f-sal" aria-label="Salary"><option value="0">Any salary</option><option value="${NMW_YEAR}">Above minimum wage (${money(NMW_YEAR)})</option><option value="25500">£25,500+</option><option value="27000">£27,000+</option><option value="30000">£30,000+</option></select>
     <select id="f-con" aria-label="Contract"><option value="all">All contracts</option>${contracts.map(c=>`<option>${esc(c)}</option>`).join("")}</select>
@@ -377,7 +386,7 @@ function viewJobs(saved){
   </div>
   ${main.length? main.map(rowHTML).join("") : `<div class="empty">${saved?"No saved jobs. Tap the star on a job to save it.":"No jobs match these filters."}</div>`}
   ${other.length?`<details class="other" ${store.get("otherOpen",false)?"open":""}><summary>Other options (${other.length}) – break one of your rules: nights, car needed, or over ${RADIUS} miles</summary>${other.map(rowHTML).join("")}</details>`:""}
-  <p class="small pad">Salary filter: hourly rates converted at 37.5 h/week. Pay per shift or unclear pay is never filtered out. Distances are straight-line from home.</p>`;
+  <p class="small pad">Salary filter: hourly rates converted at 37.5 h/week. Pay per shift or unclear pay is never filtered out, and goes last when sorting by pay. Jobs with no distance go last when sorting by nearest. Distances are straight-line from home.</p>`;
 }
 
 function viewCareers(){
@@ -457,6 +466,7 @@ function render(){
   const m = $("#main");
   const top = m.scrollTop;
   m.innerHTML = view==="jobs"? viewJobs(false) : view==="saved"? viewJobs(true) : view==="careers"? viewCareers() : view==="questions"? viewQuestions() : view==="sites"? viewSites() : viewNotes();
+  if (view==="jobs"||view==="saved") $("#f-sort").value = filt.sort || "new";
   if (view==="jobs"){ $("#f-dist").value = filt.dist; $("#f-sal").value = filt.sal; $("#f-con").value = filt.contract; }
   m.scrollTop = top;
 }
@@ -478,7 +488,7 @@ document.addEventListener("click", e => {
 document.addEventListener("toggle", e => { if (e.target.matches?.("details.other")) store.set("otherOpen", e.target.open); }, true);
 document.addEventListener("change", e => {
   const t = e.target;
-  if (t.id==="f-dist"){ filt.dist = t.value; } else if (t.id==="f-sal"){ filt.sal = t.value; } else if (t.id==="f-con"){ filt.contract = t.value; }
+  if (t.id==="f-sort"){ filt.sort = t.value; } else if (t.id==="f-dist"){ filt.dist = t.value; } else if (t.id==="f-sal"){ filt.sal = t.value; } else if (t.id==="f-con"){ filt.contract = t.value; }
   else if (t.dataset.ans && t.type==="radio"){ answers[t.dataset.ans] = t.value; store.set("answers", answers); return; }
   else return;
   store.set("filters", filt); render();
