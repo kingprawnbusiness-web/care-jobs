@@ -66,6 +66,9 @@ textarea,input[type=text]{width:100%;font:inherit;border:1px solid var(--line);b
 textarea{min-height:80px;resize:vertical}
 .notelabel{display:block;font-size:12px;color:var(--ink2);margin:14px 0 4px}
 .flag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:9px;background:#fde8e7;color:var(--red);margin-left:6px;font-weight:500}
+.warn{display:inline-block;font-size:11px;padding:1px 7px;border-radius:9px;background:#fdf0d5;color:#8a5a00;margin-left:6px;font-weight:500}
+.warnbox{background:#fdf0d5;color:#6b4600;border-radius:8px;padding:8px 10px;max-width:760px}
+.hiders{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:9px;background:#eef1f4;color:var(--ink2);margin-left:6px;font-weight:500}
 details.other{border-top:8px solid var(--bg)}
 details.other>summary{padding:12px 16px;cursor:pointer;color:var(--ink2);font-weight:500;list-style:none}
@@ -153,8 +156,18 @@ const REED_STATIC = [
 
 /* Which job titles count as care / hospital-support work (her field + related roles) */
 const CAR_RE = /drivers? only|driving licen[cs]e|driver'?s licen[cs]e|full (uk |clean |manual )?licen[cs]e|uk licen[cs]e|must (be able to )?drive|must: ?drive|ability to drive|able to drive|need to drive|will drive|driving is essential|car (is )?essential|car driver|own car|own vehicle|own transport|access to a (car|vehicle)|car owner|business (car )?insurance|mileage (is )?paid|paid mileage|mileage allowance/i;
+const CAR_OK_RE = /\bno\b[^.]{0,30}(licen|driv|car)|not (required|needed|essential|necessary)|n'?t (required|needed|essential|necessary)|don'?t need|do not need|without (a )?(car|licen|driving)|non-?driv|desirable|preferred|advantage|beneficial|ideally|helpful|useful|bonus|would be nice/i;
+function needsCar(j){
+  if (/drivers? only/i.test(j.title)) return true;
+  const text = j.title+" "+(j.description||"");
+  for (const m of text.matchAll(new RegExp(CAR_RE.source, "ig"))){
+    const around = text.slice(Math.max(0, m.index - 80), m.index + m[0].length + 80);
+    if (!CAR_OK_RE.test(around)) return true;
+  }
+  return false;
+}
 const L3_RE = /(level ?3|nvq ?3|qcf ?3|rqf ?3|level three|level [45]\b)/ig;
-const L3_OK_RE = /desirable|preferred|advantage|beneficial|bonus|ideally|willing to|work(ing)? towards|we('ll| will) (support|fund|help)|support you|opportunit|progress|funded|training (to|towards)|or equivalent experience|not essential|career path|develop/i;
+const L3_OK_RE = /level ?2|nvq ?2|qcf ?2|rqf ?2|desirable|preferred|advantage|beneficial|bonus|ideally|willing to|work(ing)? towards|we('ll| will) (support|fund|help)|support you|opportunit|progress|funded|training (to|towards)|or equivalent experience|not essential|career path|develop/i;
 function needsLevel3(text){
   for (const m of text.matchAll(L3_RE)){
     const around = text.slice(Math.max(0, m.index - 90), m.index + 90);
@@ -268,12 +281,8 @@ function ruleBreaks(j){
   const text = (j.title+" "+(j.description||"")).toLowerCase();
   if (/\bbank\b/i.test(j.title) || /bank/i.test(j.type||"")) r.push("Bank");
   if (/\bnight/.test(j.title.toLowerCase())) r.push("Night shifts");
-  if (CAR_RE.test(text)) r.push("Needs a car / driving");
+  if (needsCar(j)) r.push("Needs a car / driving");
   if (needsLevel3(j.title+" "+(j.description||""))) r.push("Asks for Level 3+ qualification");
-  const nf = j.source==="NHS Jobs" ? (nhsFlags[j.id]||[]) : [];
-  if (nf.includes("licence") && !r.includes("Needs a car / driving")) r.push("Full advert mentions a driving licence");
-  if (nf.includes("nvq")) r.push("Full advert mentions NVQ/QCF – may need Level 3, check");
-  if (nf.includes("children") && !CHILD_TITLE_RE.test(j.title)) r.push("Full advert mentions children");
   if (CHILD_TITLE_RE.test(j.title) || CHILD_TEXT_RE.test(j.description||"")) r.push("Children's work – needs experience with children");
   if (SENIOR_RE.test(j.title)) r.push("Senior or specialist role – usually needs higher qualifications or experience");
   else if (j.source==="NHS Jobs" && (() => { const n = (String(j.salary).replace(/,/g,"").match(/\d+(\.\d+)?/)||[])[0]; return n && +n >= 28392; })()) r.push("NHS Band 4 or above – usually needs Level 3");
@@ -281,6 +290,18 @@ function ruleBreaks(j){
   if (j.miles != null && j.miles > RADIUS) r.push(`Over ${RADIUS} miles`);
   return r;
 }
+
+/* Amber "check the advert" notes: NHS keyword hits (word appears somewhere in the full advert; wording unknown) */
+function warnings(j){
+  const w = [];
+  const nf = j.source==="NHS Jobs" ? (nhsFlags[j.id]||[]) : [];
+  if (nf.includes("licence")) w.push("Advert mentions a driving licence – check if it's needed");
+  if (nf.includes("nvq")) w.push("Advert mentions NVQ – check which level");
+  if (nf.includes("children") && !CHILD_TITLE_RE.test(j.title)) w.push("Advert mentions children – check the role");
+  if (!w.length && HOMECARE_RE.test(j.title+" "+(j.description||""))) w.push("Home care – check if a car is needed");
+  return w;
+}
+let hidden = store.get("hidden", {});
 
 /* ---------- jobs data ---------- */
 let feed = null, feedState = "loading", feedError = "";
@@ -294,6 +315,7 @@ function allJobs(){
     .filter((j, i, arr) => { const k = (j.title+"|"+j.employer+"|"+(j.locations||[])[0]+"|"+j.salary).toLowerCase(); return arr.findIndex(x => (x.title+"|"+x.employer+"|"+(x.locations||[])[0]+"|"+x.salary).toLowerCase() === k) === i; })
     .filter(j => { const d = daysLeft(j.closeDate); return d === null || d >= 0; })
     .filter(j => !ruleBreaks(j).some(b => /driving|licence|car\b/i.test(b))) // she has no licence: never shown
+    .filter(j => !hidden[j.id])
     .sort((a,b) => (b.postDate||"").localeCompare(a.postDate||""));
 }
 async function loadFeed(){
@@ -375,7 +397,7 @@ function rowHTML(j){
   return `<div class="row ${read[j.id]?"":"unread"}" data-id="${esc(j.id)}">
     <button class="star ${stars[j.id]?"on":""}" data-star="${esc(j.id)}" aria-label="Save job"><svg width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="${stars[j.id]?"M12 17.3 18.2 21l-1.6-7L22 9.2l-7.2-.6L12 2 9.2 8.6 2 9.2 7.4 14l-1.6 7z":"M22 9.2l-7.2-.6L12 2 9.2 8.6 2 9.2 7.4 14l-1.6 7L12 17.3l6.2 3.7-1.6-7L22 9.2zM12 15.4l-3.8 2.3 1-4.3-3.3-2.9 4.4-.4L12 6.1l1.7 4 4.4.4-3.3 2.9 1 4.3-3.8-2.3z"}"/></svg></button>
     <div class="emp">${esc(j.employer)}</div>
-    <div class="ttl">${esc(j.title)} <span>– ${esc(fmtSal(j.salary)||"salary not stated")} · ${esc((j.locations||[])[0]||"")}</span>${breaks.map(b=>`<span class="flag">${esc(b)}</span>`).join("")}${notes[j.id]?'<span class="tag">note</span>':""}${!breaks.length && HOMECARE_RE.test(j.title+" "+(j.description||""))?'<span class="tag">home care – check if a car is needed</span>':""}</div>
+    <div class="ttl">${esc(j.title)} <span>– ${esc(fmtSal(j.salary)||"salary not stated")} · ${esc((j.locations||[])[0]||"")}</span>${breaks.map(b=>`<span class="flag">${esc(b)}</span>`).join("")}${notes[j.id]?'<span class="tag">note</span>':""}${warnings(j).map(w=>`<span class="warn">${esc(w)}</span>`).join("")}</div>
     <div class="meta">${[miles, close].filter(Boolean).join(" · ")}</div>
   </div>${openId===j.id? detailHTML(j):""}`;
 }
@@ -397,7 +419,9 @@ function detailHTML(j){
     </dl>
     ${j.description?`<p class="desc">${esc(j.description.length>1200?j.description.slice(0,1200)+"…":j.description)}</p>`:""}
     ${j.note?`<p class="desc"><b>Note:</b> ${esc(j.note)}</p>`:""}
+    ${warnings(j).length?`<p class="warnbox">${warnings(j).map(esc).join("<br>")}<br><span class="small">NHS Jobs only lets the app see that the word appears, not the sentence. Open the advert to check.</span></p>`:""}
     <a class="btn" href="${esc(j.url)}" target="_blank" rel="noopener">Apply ↗</a>
+    <div class="hiders"><button class="chip" data-hide="${esc(j.id)}" data-why="Needs a driving licence">Needs licence – hide</button><button class="chip" data-hide="${esc(j.id)}" data-why="Needs Level 3">Needs Level 3 – hide</button><button class="chip" data-hide="${esc(j.id)}" data-why="Not suitable">Not suitable – hide</button></div>
     <label class="notelabel" for="n-${esc(j.id)}">Application notes</label>
     <textarea id="n-${esc(j.id)}" data-note="${esc(j.id)}" placeholder="e.g. applied 14 Nov, interview date, contact name">${esc(notes[j.id]||"")}</textarea>
   </div>`;
@@ -449,6 +473,7 @@ function viewJobs(saved){
   </div>
   ${main.length? main.map(rowHTML).join("") : `<div class="empty">${saved?"No saved jobs. Tap the star on a job to save it.":"No jobs match these filters."}</div>`}
   ${other.length?`<details class="other" ${store.get("otherOpen",false)?"open":""}><summary>Other options (${other.length}) – break one of your rules: bank, nights, higher qualifications, senior/specialist role, children's work, or over ${RADIUS} miles</summary>${other.map(rowHTML).join("")}</details>`:""}
+  ${(() => { const ids = Object.keys(hidden); if (!ids.length || saved) return ""; return `<details class="other"><summary>Hidden jobs (${ids.length}) – hidden by you</summary>${ids.map(id => `<div class="pad small">${esc(hidden[id].title||id)} · ${esc(hidden[id].employer||"")} – <b>${esc(hidden[id].why)}</b> <button class="chip" data-unhide="${esc(id)}">Show again</button></div>`).join("")}</details>`; })()}
   <p class="small pad">Salary filter: hourly rates converted at 37.5 h/week. Pay per shift or unclear pay is never filtered out, and goes last when sorting by pay. Jobs with no distance go last when sorting by nearest. Distances are straight-line from home.</p>`;
 }
 
@@ -543,6 +568,10 @@ document.addEventListener("click", e => {
   if (nav){ view = nav.dataset.v; store.set("view", view); openId = null; $("#main").scrollTop = 0; render(); return; }
   const st = e.target.closest("[data-star]");
   if (st){ e.stopPropagation(); const id = st.dataset.star; stars[id] = !stars[id]; if(!stars[id]) delete stars[id]; store.set("stars", stars); render(); return; }
+  const hb = e.target.closest("[data-hide]");
+  if (hb){ const j = allJobs().find(x => x.id === hb.dataset.hide); hidden[hb.dataset.hide] = {why: hb.dataset.why, title: j?.title||"", employer: j?.employer||""}; store.set("hidden", hidden); openId = null; render(); return; }
+  const ub = e.target.closest("[data-unhide]");
+  if (ub){ delete hidden[ub.dataset.unhide]; store.set("hidden", hidden); render(); return; }
   if (e.target.closest(".detail")) return;
   const row = e.target.closest(".row");
   if (row){ const id = row.dataset.id; openId = openId===id? null : id; read[id] = true; store.set("read", read); render(); return; }
