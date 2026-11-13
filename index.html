@@ -293,6 +293,7 @@ function allJobs(){
     .filter(j => RELEVANT.test(j.title) && !NOT_RELEVANT.test(j.title))
     .filter((j, i, arr) => { const k = (j.title+"|"+j.employer+"|"+(j.locations||[])[0]+"|"+j.salary).toLowerCase(); return arr.findIndex(x => (x.title+"|"+x.employer+"|"+(x.locations||[])[0]+"|"+x.salary).toLowerCase() === k) === i; })
     .filter(j => { const d = daysLeft(j.closeDate); return d === null || d >= 0; })
+    .filter(j => !ruleBreaks(j).some(b => /driving|licence|car\b/i.test(b))) // she has no licence: never shown
     .sort((a,b) => (b.postDate||"").localeCompare(a.postDate||""));
 }
 async function loadFeed(){
@@ -447,7 +448,7 @@ function viewJobs(saved){
     <div class="status">${statusLine()}</div>
   </div>
   ${main.length? main.map(rowHTML).join("") : `<div class="empty">${saved?"No saved jobs. Tap the star on a job to save it.":"No jobs match these filters."}</div>`}
-  ${other.length?`<details class="other" ${store.get("otherOpen",false)?"open":""}><summary>Other options (${other.length}) – break one of your rules: bank, nights, car/licence needed, higher qualifications, senior/specialist role, children's work, or over ${RADIUS} miles</summary>${other.map(rowHTML).join("")}</details>`:""}
+  ${other.length?`<details class="other" ${store.get("otherOpen",false)?"open":""}><summary>Other options (${other.length}) – break one of your rules: bank, nights, higher qualifications, senior/specialist role, children's work, or over ${RADIUS} miles</summary>${other.map(rowHTML).join("")}</details>`:""}
   <p class="small pad">Salary filter: hourly rates converted at 37.5 h/week. Pay per shift or unclear pay is never filtered out, and goes last when sorting by pay. Jobs with no distance go last when sorting by nearest. Distances are straight-line from home.</p>`;
 }
 
